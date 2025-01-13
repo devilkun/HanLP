@@ -13,10 +13,15 @@ tok
 pos
 ner
 dep
+constituency
+srl
 sdp
+amr
+amr2text
 sts
 word2vec
 glove
 fasttext
+mlm
 ```
 

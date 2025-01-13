@@ -12,8 +12,10 @@ from hanlp.datasets.tokenization.loaders.txt import TextTokenizingDataset, gener
 from hanlp.metrics.f1 import F1
 from hanlp.transform.transformer_tokenizer import TransformerSequenceTokenizer
 from hanlp.utils.span_util import bmes_to_spans
+from hanlp.utils.string_util import possible_tokenization
 from hanlp_common.util import merge_locals_kwargs
 from hanlp_trie import DictInterface, TrieDict
+from hanlp_trie.dictionary import TupleTrieDict
 
 
 class TransformerTaggingTokenizer(TransformerTagger):
@@ -81,7 +83,16 @@ class TransformerTaggingTokenizer(TransformerTagger):
     @dict_combine.setter
     def dict_combine(self, dictionary: Union[DictInterface, Union[Dict[str, Any], Set[str]]]):
         if dictionary is not None and not isinstance(dictionary, DictInterface):
-            dictionary = TrieDict(dictionary)
+            if all(isinstance(k, str) for k in dictionary):
+                dictionary = TrieDict(dictionary)
+            else:
+                _d = set()
+                for k in dictionary:
+                    if isinstance(k, str):
+                        _d.update(possible_tokenization(k))
+                    else:
+                        _d.add(k)
+                dictionary = TupleTrieDict(_d)
         self.config.dict_combine = dictionary
 
     def build_metric(self, **kwargs):
@@ -125,10 +136,22 @@ class TransformerTaggingTokenizer(TransformerTagger):
                                 tags[i] = M
                         if end < len(tags):
                             tags[end] = 'B'
-                spans.append(bmes_to_spans(tags))
-        else:
-            for tags in batch_tags:
-                spans.append(bmes_to_spans(tags))
+        if 'token_subtoken_offsets_group' not in batch:  # only check prediction on raw text for now
+            # Check cases that a single char gets split into multiple subtokens, e.g., ‥ -> . + .
+            for tags, subtoken_offsets in zip(batch_tags, batch['token_subtoken_offsets']):
+                offset = -1  # BERT produces 'ᄒ', '##ᅡ', '##ᆫ' for '한' and they share the same span
+                prev_tag = None
+                for i, (tag, (b, e)) in enumerate(zip(tags, subtoken_offsets)):
+                    if b < offset:
+                        if prev_tag == 'S':
+                            tags[i - 1] = 'B'
+                        elif prev_tag == 'E':
+                            tags[i - 1] = 'M'
+                        tags[i] = tag = 'M'
+                    offset = e
+                    prev_tag = tag
+        for tags in batch_tags:
+            spans.append(bmes_to_spans(tags))
         return spans
 
     def write_prediction(self, prediction, batch, output: TextIO):
@@ -144,29 +167,35 @@ class TransformerTaggingTokenizer(TransformerTagger):
                                                                      self.config.token_key,
                                                                      ret_subtokens=True,
                                                                      ret_subtokens_group=True,
-                                                                     ret_token_span=False)
+                                                                     ret_token_span=False,
+                                                                     dict_force=self.dict_force)
         return self._tokenizer_transform
 
     def spans_to_tokens(self, spans, batch, rebuild_span=False):
         batch_tokens = []
         dict_combine = self.dict_combine
-        for spans_per_sent, sub_tokens in zip(spans, batch[self.config.token_key]):
-            tokens = [''.join(sub_tokens[span[0]:span[1]]) for span in spans_per_sent]
+        raw_text = batch.get('token_', None)  # Use raw text to rebuild the token according to its offset
+        for b, (spans_per_sent, sub_tokens) in enumerate(zip(spans, batch[self.config.token_key])):
+            if raw_text:  # This will restore iPhone X as a whole
+                text = raw_text[b]
+                offsets = batch['token_subtoken_offsets'][b]
+                tokens = [text[offsets[b][0]:offsets[e - 1][-1]] for b, e in spans_per_sent]
+            else:  # This will merge iPhone X into iPhoneX
+                tokens = [''.join(sub_tokens[span[0]:span[1]]) for span in spans_per_sent]
             if dict_combine:
-                if rebuild_span:
-                    char_to_span = []
-                    offset = 0
-                    for start, end in spans_per_sent:
-                        char_to_span.append(offset)
-                        offset += sum(len(x) for x in sub_tokens[start:end])
                 buffer = []
                 offset = 0
                 delta = 0
                 for start, end, label in dict_combine.tokenize(tokens):
-                    # batch['raw_token'][0][start:end]
                     if offset < start:
                         buffer.extend(tokens[offset:start])
-                    buffer.append(''.join(tokens[start:end]))
+                    if raw_text:
+                        # noinspection PyUnboundLocalVariable
+                        combined = text[offsets[spans_per_sent[start - delta][0]][0]:
+                                        offsets[spans_per_sent[end - delta - 1][1] - 1][1]]
+                    else:
+                        combined = ''.join(tokens[start:end])
+                    buffer.append(combined)
                     offset = end
                     if rebuild_span:
                         start -= delta
@@ -186,7 +215,7 @@ class TransformerTaggingTokenizer(TransformerTagger):
 
     def prediction_to_human(self, pred, vocab, batch, rebuild_span=False):
         output_spans = self.config.get('output_spans', None)
-        tokens = self.spans_to_tokens(pred, batch, rebuild_span)
+        tokens = self.spans_to_tokens(pred, batch, rebuild_span or output_spans)
         if output_spans:
             subtoken_spans = batch['token_subtoken_offsets']
             results = []
@@ -210,7 +239,7 @@ class TransformerTaggingTokenizer(TransformerTagger):
 
     def fit(self, trn_data, dev_data, save_dir, transformer, average_subwords=False, word_dropout: float = 0.2,
             hidden_dropout=None, layer_dropout=0, scalar_mix=None, grad_norm=5.0,
-            transformer_grad_norm=None, lr=5e-5,
+            transformer_grad_norm=None, lr=5e-5, eval_trn=True,
             transformer_lr=None, transformer_layers=None, gradient_accumulation=1,
             adam_epsilon=1e-8, weight_decay=0, warmup_steps=0.1, crf=False, reduction='sum',
             batch_size=32, sampler_builder: SamplerBuilder = None, epochs=30, patience=5, token_key=None,

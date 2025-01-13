@@ -12,6 +12,7 @@ package com.hankcs.hanlp.restful;
 
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.hankcs.hanlp.restful.mrp.MeaningRepresentation;
 
 import java.io.BufferedReader;
 import java.io.IOException;
@@ -224,6 +225,56 @@ public class HanLPClient
     }
 
     /**
+     * Grammatical Error Correction (GEC) is the task of correcting different kinds of errors in text such as
+     * spelling, punctuation, grammatical, and word choice errors.
+     *
+     * @param text Text potentially containing different kinds of errors such as spelling, punctuation,
+     *             grammatical, and word choice errors.
+     * @return Corrected text.
+     */
+    public List<String> grammaticalErrorCorrection(List<String> text) throws IOException
+    {
+        Map<String, Object> input = new HashMap<>();
+        input.put("text", text);
+        input.put("language", language);
+        //noinspection unchecked
+        return mapper.readValue(post("/grammatical_error_correction", input), List.class);
+    }
+
+    /**
+     * Grammatical Error Correction (GEC) is the task of correcting different kinds of errors in text such as
+     * spelling, punctuation, grammatical, and word choice errors.
+     *
+     * @param text Text potentially containing different kinds of errors such as spelling, punctuation,
+     *             grammatical, and word choice errors.
+     * @return Corrected text.
+     */
+    public String[] grammaticalErrorCorrection(String[] text) throws IOException
+    {
+        Map<String, Object> input = new HashMap<>();
+        input.put("text", text);
+        input.put("language", language);
+        //noinspection unchecked
+        return mapper.readValue(post("/grammatical_error_correction", input), String[].class);
+    }
+
+    /**
+     * Grammatical Error Correction (GEC) is the task of correcting different kinds of errors in text such as
+     * spelling, punctuation, grammatical, and word choice errors.
+     *
+     * @param text Text potentially containing different kinds of errors such as spelling, punctuation,
+     *             grammatical, and word choice errors.
+     * @return Corrected text.
+     */
+    public String grammaticalErrorCorrection(String text) throws IOException
+    {
+        Map<String, Object> input = new HashMap<>();
+        input.put("text", text);
+        input.put("language", language);
+        return mapper.readValue(post("/grammatical_error_correction", input), String.class);
+    }
+
+    /**
      * Semantic textual similarity deals with determining how similar two pieces of texts are.
      *
      * @param textA The first text.
@@ -231,12 +282,12 @@ public class HanLPClient
      * @return Their similarity.
      * @throws IOException HTTP errors.
      */
-    public Float semanticTextualSimilarity(String textA, String textB) throws IOException
+    public Double semanticTextualSimilarity(String textA, String textB) throws IOException
     {
         Map<String, Object> input = new HashMap<>();
         input.put("text", new String[]{textA, textB});
         input.put("language", language);
-        return mapper.readValue(post("/semantic_textual_similarity", input), Float.class);
+        return mapper.readValue(post("/semantic_textual_similarity", input), Double.class);
     }
 
     /**
@@ -246,7 +297,7 @@ public class HanLPClient
      * @return Their similarities.
      * @throws IOException HTTP errors.
      */
-    public List<Float> semanticTextualSimilarity(String[][] text) throws IOException
+    public List<Double> semanticTextualSimilarity(String[][] text) throws IOException
     {
         Map<String, Object> input = new HashMap<>();
         input.put("text", text);
@@ -323,6 +374,198 @@ public class HanLPClient
             results.add(spans);
         }
         return results;
+    }
+
+    /**
+     * Abstract Meaning Representation (AMR) captures “who is doing what to whom” in a sentence. Each sentence is
+     * represented as a rooted, directed, acyclic graph consisting of nodes (concepts) and edges (relations).
+     *
+     * @param text A piece of text, usually a document without tokenization.
+     * @return AMR graphs.
+     * @throws IOException HTTP errors.
+     */
+    public MeaningRepresentation[] abstractMeaningRepresentation(String text) throws IOException
+    {
+        Map<String, Object> input = new HashMap<>();
+        input.put("text", text);
+        input.put("language", language);
+        return mapper.readValue(post("/abstract_meaning_representation", input), MeaningRepresentation[].class);
+    }
+
+    /**
+     * Abstract Meaning Representation (AMR) captures “who is doing what to whom” in a sentence. Each sentence is
+     * represented as a rooted, directed, acyclic graph consisting of nodes (concepts) and edges (relations).
+     *
+     * @param tokens A list of sentences where each sentence is a list of tokens.
+     * @return AMR graphs.
+     * @throws IOException HTTP errors.
+     */
+    public MeaningRepresentation[] abstractMeaningRepresentation(String[][] tokens) throws IOException
+    {
+        Map<String, Object> input = new HashMap<>();
+        input.put("tokens", tokens);
+        input.put("language", language);
+        return mapper.readValue(post("/abstract_meaning_representation", input), MeaningRepresentation[].class);
+    }
+
+    /**
+     * Keyphrase extraction aims to identify keywords or phrases reflecting the main topics of a document.
+     *
+     * @param text The text content of the document. Preferably the concatenation of the title and the content.
+     * @param topk The number of top-K ranked keywords or keyphrases.
+     * @return A dictionary containing each keyphrase and its ranking score s between 0 and 1.
+     * @throws IOException HTTP errors.
+     */
+    public Map<String, Double> keyphraseExtraction(String text, int topk) throws IOException
+    {
+        Map<String, Object> input = new HashMap<>();
+        input.put("text", text);
+        input.put("topk", topk);
+        input.put("language", language);
+        //noinspection unchecked
+        return mapper.readValue(post("/keyphrase_extraction", input), LinkedHashMap.class);
+    }
+
+    /**
+     * Single document summarization is the task of selecting a subset of the sentences which best
+     * represents a summary of the document, with a balance of salience and redundancy.
+     *
+     * @param text The text content of the document.
+     * @return A dictionary containing each sentence and its ranking score s between 0 and 1.
+     * @throws IOException HTTP errors.
+     */
+    public Map<String, Double> extractiveSummarization(String text) throws IOException
+    {
+        return extractiveSummarization(text, 3);
+    }
+
+    /**
+     * Single document summarization is the task of selecting a subset of the sentences which best
+     * represents a summary of the document, with a balance of salience and redundancy.
+     *
+     * @param text The text content of the document.
+     * @param topk The maximum number of top-K ranked sentences. Note that due to Trigram Blocking tricks, the actual
+     *             number of returned sentences could be less than ``topk``.
+     * @return A dictionary containing each sentence and its ranking score s between 0 and 1.
+     * @throws IOException HTTP errors.
+     */
+    public Map<String, Double> extractiveSummarization(String text, int topk) throws IOException
+    {
+        Map<String, Object> input = new HashMap<>();
+        input.put("text", text);
+        input.put("topk", topk);
+        input.put("language", language);
+        //noinspection unchecked
+        return mapper.readValue(post("/extractive_summarization", input), LinkedHashMap.class);
+    }
+
+    /**
+     * Abstractive Summarization is the task of generating a short and concise summary that captures the
+     * salient ideas of the source text. The generated summaries potentially contain new phrases and sentences that
+     * may not appear in the source text.
+     *
+     * @param text The text content of the document.
+     * @return Summarization.
+     * @throws IOException HTTP errors.
+     */
+    public String abstractiveSummarization(String text) throws IOException
+    {
+        Map<String, Object> input = new HashMap<>();
+        input.put("text", text);
+        input.put("language", language);
+        //noinspection unchecked
+        return mapper.readValue(post("/abstractive_summarization", input), String.class);
+    }
+
+    /**
+     * Text classification is the task of assigning a sentence or document an appropriate category.
+     * The categories depend on the chosen dataset and can range from topics.
+     *
+     * @param text  The text content of the document.
+     * @param model The model to use for prediction.
+     * @return Classification results.
+     * @throws IOException HTTP errors.
+     */
+    public String textClassification(String text, String model) throws IOException
+    {
+        return (String) textClassification(text, model, false, false);
+    }
+
+
+    /**
+     * Sentiment analysis is the task of classifying the polarity of a given text. For instance,
+     * a text-based tweet can be categorized into either "positive", "negative", or "neutral".
+     *
+     * @param text The text content of the document.
+     * @return Sentiment polarity as a numerical value which measures how positive the sentiment is.
+     * @throws IOException HTTP errors.
+     */
+    public Double sentimentAnalysis(String text) throws IOException
+    {
+        Map<String, Object> input = new HashMap<>();
+        input.put("text", text);
+        input.put("language", language);
+        //noinspection unchecked
+        return mapper.readValue(post("/sentiment_analysis", input), Double.class);
+    }
+
+
+    /**
+     * Text classification is the task of assigning a sentence or document an appropriate category.
+     * The categories depend on the chosen dataset and can range from topics.
+     *
+     * @param text  A document or a list of documents.
+     * @param model The model to use for prediction.
+     * @param topk  `true` or `int` to return the top-k languages.
+     * @param prob  Return also probabilities.
+     * @return Classification results.
+     * @throws IOException HTTP errors.
+     */
+    public Object textClassification(Object text, String model, Object topk, boolean prob) throws IOException
+    {
+        Map<String, Object> input = new HashMap<>();
+        input.put("text", text);
+        input.put("model", model);
+        input.put("topk", topk);
+        input.put("prob", prob);
+        //noinspection unchecked
+        return mapper.readValue(post("/text_classification", input), Object.class);
+    }
+
+    /**
+     * Recognize the language of a given text.
+     *
+     * @param text The text content of the document.
+     * @return Identified language in <a href="https://en.wikipedia.org/wiki/List_of_ISO_639-1_codes">ISO 639-1 codes</a>.
+     * @throws IOException HTTP errors.
+     */
+    public String languageIdentification(String text) throws IOException
+    {
+        return textClassification(text, "lid");
+    }
+
+    /**
+     * Recognize the language of a given text.
+     *
+     * @param text The text content of the document.
+     * @return Identified language in <a href="https://en.wikipedia.org/wiki/List_of_ISO_639-1_codes">ISO 639-1 codes</a>.
+     * @throws IOException HTTP errors.
+     */
+    public List<String> languageIdentification(String[] text) throws IOException
+    {
+        return (List<String>) textClassification(text, "lid", false, false);
+    }
+
+    /**
+     * Keyphrase extraction aims to identify keywords or phrases reflecting the main topics of a document.
+     *
+     * @param text The text content of the document. Preferably the concatenation of the title and the content.
+     * @return A dictionary containing 10 keyphrases and their ranking scores s between 0 and 1.
+     * @throws IOException HTTP errors.
+     */
+    public Map<String, Double> keyphraseExtraction(String text) throws IOException
+    {
+        return keyphraseExtraction(text, 10);
     }
 
     private String post(String api, Object input_) throws IOException

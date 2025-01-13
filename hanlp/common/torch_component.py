@@ -97,7 +97,10 @@ class TorchComponent(Component, ABC):
         save_dir = get_resource(save_dir)
         filename = os.path.join(save_dir, filename)
         # flash(f'Loading model: {filename} [blink]...[/blink][/yellow]')
-        self.model_.load_state_dict(torch.load(filename, map_location='cpu'), strict=False)
+        try:
+            self.model_.load_state_dict(torch.load(filename, map_location='cpu', weights_only=True), strict=False)
+        except TypeError:
+            self.model_.load_state_dict(torch.load(filename, map_location='cpu'), strict=False)
         # flash('')
 
     def save_config(self, save_dir, filename='config.json'):
@@ -248,6 +251,8 @@ class TorchComponent(Component, ABC):
                 self.load(finetune, devices=devices)
             else:
                 self.load(save_dir, devices=devices)
+            self.config.finetune = finetune
+            self.vocabs.unlock()  # For extending vocabs
             logger.info(
                 f'Finetune model loaded with {sum(p.numel() for p in self.model.parameters() if p.requires_grad)}'
                 f'/{sum(p.numel() for p in self.model.parameters())} trainable/total parameters.')
@@ -258,13 +263,12 @@ class TorchComponent(Component, ABC):
         dev = self.build_dataloader(**merge_dict(config, data=dev_data, batch_size=batch_size, shuffle=False,
                                                  training=None, device=first_device, logger=logger, vocabs=self.vocabs,
                                                  overwrite=True)) if dev_data else None
-        if not finetune:
-            flash('[yellow]Building model [blink]...[/blink][/yellow]')
-            self.model = self.build_model(**merge_dict(config, training=True))
-            flash('')
-            logger.info(f'Model built with {sum(p.numel() for p in self.model.parameters() if p.requires_grad)}'
-                        f'/{sum(p.numel() for p in self.model.parameters())} trainable/total parameters.')
-            assert self.model, 'build_model is not properly implemented.'
+        flash('[yellow]Building model [blink]...[/blink][/yellow]')
+        self.model = self.build_model(**merge_dict(config, training=True), logger=logger)
+        flash('')
+        logger.info(f'Model built with {sum(p.numel() for p in self.model.parameters() if p.requires_grad)}'
+                    f'/{sum(p.numel() for p in self.model.parameters())} trainable/total parameters.')
+        assert self.model, 'build_model is not properly implemented.'
         _description = repr(self.model)
         if len(_description.split('\n')) < 10:
             logger.info(_description)
@@ -515,9 +519,14 @@ class TorchComponent(Component, ABC):
             logger: Logger for printing progress report, as copying a model from CPU to GPU can takes several seconds.
             verbose: ``True`` to print progress when logger is None.
         """
-        if devices == -1 or devices == [-1]:
+        if devices is None:
+            # if getattr(torch, 'has_mps', None):  # mac M1 chips
+            #     devices = torch.device('mps:0')
+            # else:
+            devices = cuda_devices(devices)
+        elif devices == -1 or devices == [-1]:
             devices = []
-        elif isinstance(devices, (int, float)) or devices is None:
+        elif isinstance(devices, (int, float)):
             devices = cuda_devices(devices)
         if devices:
             if logger:
@@ -546,6 +555,10 @@ class TorchComponent(Component, ABC):
                             flash(f'Moving module [yellow]{name}[/yellow] to [on_yellow][magenta][bold]{device}'
                                   f'[/bold][/magenta][/on_yellow]: [red]{regex}[/red]\n')
                             module.to(device)
+            elif isinstance(devices, torch.device):
+                if verbose:
+                    flash(f'Moving model to {devices} [blink][yellow]...[/yellow][/blink]')
+                self.model = self.model.to(devices)
             else:
                 raise ValueError(f'Unrecognized devices {devices}')
             if verbose:

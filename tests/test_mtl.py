@@ -22,6 +22,15 @@ class TestMultiTaskLearning(unittest.TestCase):
             ["研究", "生命"]
         ])
 
+    def test_mtl_empty_str(self):
+        mtl('')
+        mtl(' ')
+        mtl([''])
+        mtl([' '])
+        mtl(['', ' '])
+        mtl(['', ' ', 'good'])
+        mtl([[]], skip_tasks='tok*')
+
     def test_skip_tok(self):
         pre_tokenized_sents = [
             ["商品和服务", '一个', '词'],
@@ -65,8 +74,37 @@ class TestMultiTaskLearning(unittest.TestCase):
         self.assertSequenceEqual(mtl('͡', tasks='tok/fine')['tok/fine'], ['͡'])
 
     def test_space(self):
-        doc: Document = mtl('商品 和服务')
-        self.assertSequenceEqual(doc['tok/fine'], ["商品", "和", "服务"])
+        task = 'tok/fine'
+        doc: Document = mtl('商品 和服务', tasks=task)
+        self.assertSequenceEqual(doc[task], ["商品", "和", "服务"])
+        mtl[task].dict_combine = {('iPad', 'Pro'), '2个空格'}
+        self.assertSequenceEqual(mtl("如何评价iPad Pro ？iPad  Pro有2个空格", tasks=task)[task],
+                                 ['如何', '评价', 'iPad Pro', '？', 'iPad  Pro', '有', '2个空格'])
+
+    def test_transform(self):
+        task = 'tok/fine'
+        mtl[task].dict_force = {'用户ID'}
+        self.assertSequenceEqual(mtl("我的用户ID跟你的用户id不同", tasks=task)[task],
+                                 ['我', '的', '用户ID', '跟', '你', '的', '用户', 'id', '不同'])
+
+    def test_tok_offset(self):
+        task = 'tok/fine'
+        tok = mtl[task]
+        tok.config.output_spans = True
+        tok.dict_force = None
+        tok.dict_combine = None
+        sent = '我先去看医生'
+
+        for t, b, e in mtl(sent, tasks=task)[task]:
+            self.assertEqual(t, sent[b:e])
+
+        tok.dict_combine = {'先去'}
+        for t, b, e in mtl(sent, tasks=task)[task]:
+            self.assertEqual(t, sent[b:e])
+
+        tok.config.output_spans = False
+        tok.dict_force = None
+        tok.dict_combine = None
 
 
 if __name__ == '__main__':

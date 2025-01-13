@@ -16,12 +16,44 @@ from hanlp_common.visualization import tree_to_list, list_to_tree, render_labele
 
 class Document(dict):
     def __init__(self, *args, **kwargs) -> None:
-        """
-        A dict structure holding parsed annotations.
+        r"""A dict structure holding parsed annotations. A document is a subclass of ``dict`` and it supports every
+        interface of ``dict``\. Additionally, it supports interfaces to deal with various linguistic structures. Its
+        ``str`` and ``dict`` representations are made to be compatible with JSON serialization.
 
         Args:
             *args: An iterator of key-value pairs.
             **kwargs: Arguments from ``**`` operator.
+
+        Examples::
+
+            # Create a document
+            doc = Document(
+                tok=[["晓美焰", "来到", "北京", "立方庭", "参观", "自然", "语义", "科技", "公司"]],
+                pos=[["NR", "VV", "NR", "NR", "VV", "NN", "NN", "NN", "NN"]],
+                ner=[[["晓美焰", "PERSON", 0, 1], ["北京立方庭", "LOCATION", 2, 4],
+                      ["自然语义科技公司", "ORGANIZATION", 5, 9]]],
+                dep=[[[2, "nsubj"], [0, "root"], [4, "name"], [2, "dobj"], [2, "conj"],
+                      [9, "compound"], [9, "compound"], [9, "compound"], [5, "dobj"]]]
+            )
+
+            # print(doc) or str(doc) to get its JSON representation
+            print(doc)
+
+            # Access an annotation by its task name
+            print(doc['tok'])
+
+            # Get number of sentences
+            print(f'It has {doc.count_sentences()} sentence(s)')
+
+            # Access the n-th sentence
+            print(doc.squeeze(0)['tok'])
+
+            # Pretty print it right in your console or notebook
+            doc.pretty_print()
+
+            # To save the pretty prints in a str
+            pretty_text: str = '\n\n'.join(doc.to_pretty())
+
         """
         super().__init__(*args, **kwargs)
         for k, v in list(self.items()):
@@ -77,7 +109,7 @@ class Document(dict):
         """
         d = dict(self)
         for k, v in self.items():
-            if not v:
+            if v == [] or v is None:
                 continue
             if k == 'con':
                 if not isinstance(v, Tree) and not isinstance(v[0], Tree):
@@ -97,7 +129,7 @@ class Document(dict):
     def __str__(self) -> str:
         return self.to_json()
 
-    def to_conll(self, tok='tok', lem='lem', pos='pos', dep='dep', sdp='sdp') -> Union[
+    def to_conll(self, tok='tok', lem='lem', pos='pos', xpos='pos/xpos', fea='fea', dep='dep', sdp='sdp') -> Union[
         CoNLLSentence, List[CoNLLSentence]]:
         """
         Convert to :class:`~hanlp_common.conll.CoNLLSentence`.
@@ -105,7 +137,9 @@ class Document(dict):
         Args:
             tok (str): Field name for tok.
             lem (str): Field name for lem.
-            pos (str): Filed name for upos.
+            pos (str): Field name for upos.
+            xpos (str): Field name for xpos.
+            fea (str): Field name for feats.
             dep (str): Field name for dependency parsing.
             sdp (str): Field name for semantic dependency parsing.
 
@@ -116,10 +150,12 @@ class Document(dict):
         tok = prefix_match(tok, self)
         lem = prefix_match(lem, self)
         pos = prefix_match(pos, self)
+        xpos = prefix_match(xpos, self)
+        fea = prefix_match(fea, self)
         dep = prefix_match(dep, self)
         sdp = prefix_match(sdp, self)
         results = CoNLLSentenceList()
-        if not self[tok]:
+        if not tok or not self[tok]:
             return results
         self = self._to_doc_without_spans(tok)
         flat = isinstance(self[tok][0], str)
@@ -141,7 +177,8 @@ class Document(dict):
                 if not _dep:
                     _dep = (None, None)
                 sent.append(
-                    CoNLLUWord(i + 1, form=_tok, lemma=get(lem, i), upos=get(pos, i), head=_dep[0], deprel=_dep[1],
+                    CoNLLUWord(i + 1, form=_tok, lemma=get(lem, i), upos=get(pos, i), xpos=get(xpos, i),
+                               feats=get(fea, i), head=_dep[0], deprel=_dep[1],
                                deps=None if not get(sdp, i) else '|'.join(f'{x[0]}:{x[1]}' for x in get(sdp, i))))
             results.append(sent)
         if flat:
@@ -173,7 +210,7 @@ class Document(dict):
         tok = prefix_match(tok, self)
         pos = prefix_match(pos, self)
         ner = prefix_match(ner, self)
-        conlls = self.to_conll(tok, lem, pos, dep, sdp)
+        conlls = self.to_conll(tok=tok, lem=lem, pos=pos, dep=dep, sdp=sdp)
         flat = isinstance(conlls, CoNLLSentence)
         if flat:
             conlls: List[CoNLLSentence] = [conlls]
@@ -249,6 +286,10 @@ class Document(dict):
                             # warnings.warn(f'Unable to visualize overlapped spans: {pas}')
                             continue
                         block[0].extend(header)
+                        while len(_srl) < length:
+                            _srl.append('')
+                        while len(_type) < length:
+                            _type.append('')
                         for j, (_s, _t) in enumerate(zip(_srl, _type)):
                             block[j + 1].extend((tokens[j], _s, _t))
                     text = condense(block, extras)
@@ -312,19 +353,19 @@ class Document(dict):
 
                 text = condense(block)
                 # Cosmetic issues
-                for row in text:
+                for row in text[1:]:
                     while '  ─' in row[1]:
                         row[1] = row[1].replace('  ─', ' ──')
-                    row[1] = row[1].replace('─  │', '───┤')
-                    row[1] = row[1].replace('─  ├', '───┼')
-                    row[1] = re.sub(r'►(\w+)(\s+)([│├])', lambda
-                        m: f'►{m.group(1)}{"─" * len(m.group(2))}{"┤" if m.group(3) == "│" else "┼"}', row[1])
+                    row[1] = row[1].replace('─ ─', '───')
+                    row[1] = re.sub(r'([►─])([\w-]*)(\s+)([│├])', lambda
+                        m: f'{m.group(1)}{m.group(2)}{"─" * len(m.group(3))}{"┤" if m.group(4) == "│" else "┼"}',
+                                    row[1])
                     row[1] = re.sub(r'►(─+)►', r'─\1►', row[1])
                 for r, s in zip(extras, text):
                     r.extend(s)
             # warnings.warn('Unable to visualize non-projective trees.')
             if dep in self and conll.projective:
-                text = conll.to_tree(extras)
+                text = conll.to_tree(extras, main_pos=True)
                 if not show_header:
                     text = text.split('\n')
                     text = '\n'.join(text[2:])
@@ -348,10 +389,10 @@ class Document(dict):
                     for row in cells:
                         cols[-1].append(row[i])
 
-                html = '<div style="display: table; line-height: 128%;">'
+                html = '<div style="display: table; padding-bottom: 1rem;">'
                 for i, each in enumerate(cols):
                     html += '<pre style="display: table-cell; font-family: SFMono-Regular,Menlo,Monaco,Consolas,' \
-                            'Liberation Mono,Courier New,monospace; white-space: nowrap;">'
+                            'Liberation Mono,Courier New,monospace; white-space: nowrap; line-height: 128%; padding: 0;">'
                     if i != len(cols) - 1:
                         each = [x + ' ' for x in each]
                     html += '<br>'.join([x.replace(' ', '&nbsp;') for x in each])
@@ -385,7 +426,7 @@ class Document(dict):
         results = self.to_pretty(tok, lem, pos, dep, sdp, ner, srl, con, show_header, html=html)
         if isinstance(results, str):
             results = [results]
-        if IPYTHON:
+        if html and IPYTHON:
             from IPython.core.display import display, HTML
             display(HTML('<br>'.join(results)))
         else:
@@ -434,11 +475,14 @@ class Document(dict):
                         anno_per_sent[i] = translate.get(v, v)
         return self
 
-    def squeeze(self):
+    def squeeze(self, i=0):
         r"""
-        Squeeze the dimension of each field into one. It's intended to convert a nested document like ``[[sent1]]``
-        to ``[sent1]``. When there are multiple sentences, only the first one will be returned. Note this is not an
+        Squeeze the dimension of each field into one. It's intended to convert a nested document like ``[[sent_i]]``
+        to ``[sent_i]``. When there are multiple sentences, only the ``i-th`` one will be returned. Note this is not an
         inplace operation.
+
+        Args:
+            i: Keep the element at ``index`` for all ``list``\s.
 
         Returns:
             A squeezed document with only one sentence.
@@ -446,7 +490,7 @@ class Document(dict):
         """
         sq = Document()
         for k, v in self.items():
-            sq[k] = v[0] if isinstance(v, list) else v
+            sq[k] = v[i] if isinstance(v, list) else v
         return sq
 
     def _to_doc_without_spans(self, tok: str):
@@ -473,3 +517,30 @@ class Document(dict):
         d = Document(**self)
         d[tok] = tokens
         return d
+
+    def get_by_prefix(self, prefix: str):
+        """
+        Get value by the prefix of a key.
+
+        Args:
+            prefix: The prefix of a key. If multiple keys are matched, only the first one will be used.
+
+        Returns:
+            The value assigned with the matched key.
+        """
+        key = prefix_match(prefix, self)
+        if not key:
+            return None
+        return self[key]
+
+    def count_sentences(self) -> int:
+        """
+        Count number of sentences in this document.
+
+        Returns:
+            Number of sentences.
+        """
+        tok = self.get_by_prefix('tok')
+        if isinstance(tok[0], str):
+            return 1
+        return len(tok)

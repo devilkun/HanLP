@@ -27,7 +27,6 @@ from hanlp.common.transform import FieldLength, TransformList
 from hanlp.components.mtl.tasks import Task
 from hanlp.layers.embeddings.contextual_word_embedding import ContextualWordEmbedding, ContextualWordEmbeddingModule
 from hanlp.layers.embeddings.embedding import Embedding
-from hanlp.layers.transformers.pt_imports import optimization
 from hanlp.layers.transformers.utils import pick_tensor_for_each_token
 from hanlp.metrics.metric import Metric
 from hanlp.metrics.mtl import MetricDict
@@ -251,6 +250,7 @@ class MultiTaskLearning(TorchComponent):
         for _lr, ps in no_decay_by_lr.items():
             parameter_groups.append({"params": ps, 'lr': _lr, 'weight_decay': 0.0})
         # noinspection PyTypeChecker
+        from transformers import optimization
         encoder_optimizer = optimization.AdamW(
             parameter_groups,
             lr=lr,
@@ -475,10 +475,12 @@ class MultiTaskLearning(TorchComponent):
             A :class:`~hanlp_common.document.Document`.
         """
         doc = Document()
-        if not data:
-            return doc
-
         target_tasks = resolved_tasks or self.resolve_tasks(tasks, skip_tasks)
+        if data == []:
+            for group in target_tasks:
+                for task_name in group:
+                    doc[task_name] = []
+            return doc
         flatten_target_tasks = [self.tasks[t] for group in target_tasks for t in group]
         cls_is_bos = any([x.cls_is_bos for x in flatten_target_tasks])
         sep_is_eos = any([x.sep_is_eos for x in flatten_target_tasks])
@@ -511,7 +513,7 @@ class MultiTaskLearning(TorchComponent):
                         continue
                     output_dict = self.predict_task(self.tasks[task_name], task_name, batch, results, output_dict,
                                                     run_transform=True, cls_is_bos=cls_is_bos, sep_is_eos=sep_is_eos)
-                if group_id == 0:
+                if group_id == 0 and len(target_tasks) > 1:
                     # We are kind of hard coding here. If the first task is a tokenizer,
                     # we need to convert the hidden and mask to token level
                     if first_task_name.startswith('tok'):
@@ -798,3 +800,16 @@ class MultiTaskLearning(TorchComponent):
 
     def items(self):
         yield from self.tasks.items()
+
+    def __setattr__(self, key: str, value):
+        if key and key.startswith('dict') and not hasattr(self, key):
+            please_read_the_doc_ok = f'This MTL component has no {key}.'
+            matched_children = []
+            for name in self.config.task_names:
+                if hasattr(self[name], key):
+                    matched_children.append(name)
+            if matched_children:
+                please_read_the_doc_ok += f' Maybe you are looking for one of its tasks: {matched_children}. ' \
+                                          f'For example, HanLP["{matched_children[0]}"].{key} = ...'
+            raise TypeError(please_read_the_doc_ok)
+        object.__setattr__(self, key, value)

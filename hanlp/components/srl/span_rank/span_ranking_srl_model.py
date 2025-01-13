@@ -17,6 +17,13 @@ def initializer_1d(input_tensor, initializer):
     return input_tensor.view(-1)
 
 
+try:
+    from torch import sparse_coo_tensor as _sparse_tensor
+except ImportError:
+    # noinspection PyUnresolvedReferences
+    from torch.sparse import FloatTensor as _sparse_tensor
+
+
 class SpanRankingSRLDecoder(nn.Module):
 
     def __init__(self, context_layer_output_dim, label_space_size, config) -> None:
@@ -271,9 +278,9 @@ class SpanRankingSRLDecoder(nn.Module):
             sparse_indices = torch.cat([sparse_indices, span_parents.unsqueeze(2)], 2)
 
         rank = 3 if span_parents is None else 4
-        dense_labels = torch.sparse.LongTensor(sparse_indices.view(num_sentences * max_spans_num, rank).t(),
-                                               span_labels.view(-1),
-                                               torch.Size([num_sentences] + [max_sentence_length] * (rank - 1))) \
+        dense_labels = _sparse_tensor(sparse_indices.view(num_sentences * max_spans_num, rank).t(),
+                                      span_labels.view(-1),
+                                      torch.Size([num_sentences] + [max_sentence_length] * (rank - 1))) \
             .to_dense()
         return dense_labels
 
@@ -387,9 +394,8 @@ class SpanRankingSRLDecoder(nn.Module):
         max_candidate_spans_num_per_sentence = candidate_mask.size()[1]
         sparse_indices = candidate_mask.nonzero(as_tuple=False)
         sparse_values = torch.arange(0, candidate_span_number, device=device)
-        candidate_span_ids = torch.sparse.FloatTensor(sparse_indices.t(), sparse_values,
-                                                      torch.Size([num_sentences,
-                                                                  max_candidate_spans_num_per_sentence])).to_dense()
+        candidate_span_ids = _sparse_tensor(sparse_indices.t(), sparse_values, torch.Size(
+            [num_sentences, max_candidate_spans_num_per_sentence])).to_dense()
         spans_log_mask = torch.log(candidate_mask.to(torch.float))
         predict_dict = {"candidate_starts": candidate_starts, "candidate_ends": candidate_ends,
                         "head_scores": head_scores}
@@ -473,7 +479,7 @@ class SpanRankingSRLModel(nn.Module):
         self.embed = embed
         # Initialize context layer
         self.context_layer = context_layer
-        context_layer_output_dim = context_layer.get_output_dim()
+        context_layer_output_dim = context_layer.get_output_dim() if context_layer else self.word_embedding_dim
         self.decoder = SpanRankingSRLDecoder(context_layer_output_dim, label_space_size, config)
 
     def forward(self,
@@ -484,9 +490,10 @@ class SpanRankingSRLModel(nn.Module):
 
         context_embeddings = self.embed(batch)
         context_embeddings = F.dropout(context_embeddings, self.lexical_dropout, self.training)
-        contextualized_embeddings = self.context_layer(context_embeddings, masks)
+        if self.context_layer:
+            context_embeddings = self.context_layer(context_embeddings, masks)
 
-        return self.decoder.decode(contextualized_embeddings, sent_lengths, masks, gold_arg_starts, gold_arg_ends,
+        return self.decoder.decode(context_embeddings, sent_lengths, masks, gold_arg_starts, gold_arg_ends,
                                    gold_arg_labels, gold_predicates)
 
     @staticmethod

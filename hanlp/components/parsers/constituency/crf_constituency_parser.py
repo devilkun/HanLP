@@ -119,15 +119,21 @@ class CRFConstituencyParser(TorchComponent):
         s_span, s_label = out
         if not decoder:
             decoder = self.model.decoder
-        if span_probs is None:
-            if self.config.mbr:
-                s_span = decoder.crf(s_span, mask, mbr=True)
+        if mask.any().item():
+            if span_probs is None:
+                if self.config.mbr:
+                    s_span = decoder.crf(s_span, mask, mbr=True)
+            else:
+                s_span = span_probs
+            chart_preds = decoder.decode(s_span, s_label, mask)
         else:
-            s_span = span_probs
-        chart_preds = decoder.decode(s_span, s_label, mask)
+            chart_preds = [[]] * len(tokens)
         idx_to_token = self.vocabs.chart.idx_to_token
         if tokens is None:
-            tokens = [x[1:-1] for x in batch['token']]
+            tokens = batch.get('token_', None)  # Use the original tokens if any
+            if tokens is None:
+                tokens = batch['token']
+            tokens = [x[1:-1] for x in tokens]
         trees = [build_tree(token, [(i, j, idx_to_token[label]) for i, j, label in chart]) for token, chart in
                  zip(tokens, chart_preds)]
         # probs = [prob[:i - 1, 1:i].cpu() for i, prob in zip(lens, s_span.unbind())]
@@ -228,15 +234,14 @@ class CRFConstituencyParser(TorchComponent):
             sampler = None
         return PadSequenceDataLoader(dataset, batch_size, shuffle, device=device, batch_sampler=sampler)
 
-    def predict(self, data: Union[str, List[str]], batch_size: int = None, **kwargs):
+    def predict(self, data: Union[str, List[str]], **kwargs):
         if not data:
             return []
         flat = self.input_is_flat(data)
         if flat:
             data = [data]
         samples = self.build_samples(data)
-        dataloader = self.build_dataloader(samples, device=self.device,
-                                           **merge_dict(self.config, batch_size=batch_size, overwrite=True))
+        dataloader = self.build_dataloader(samples, device=self.device, **kwargs)
         outputs = []
         orders = []
         for idx, batch in enumerate(dataloader):

@@ -14,6 +14,7 @@ from torch.nn.utils.rnn import pad_sequence
 
 from hanlp.utils.io_util import get_resource, replace_ext, TimingFileIterator
 from hanlp.utils.log_util import logger, flash
+from hanlp_common.constant import HANLP_VERBOSE
 from hanlp_common.io import load_pickle, save_pickle
 
 
@@ -223,17 +224,19 @@ def load_word2vec_as_vocab_tensor(path, delimiter=' ', cache=True) -> Tuple[Dict
     matrix_path = replace_ext(realpath, '.pt')
     if cache:
         try:
-            flash('Loading vocab and matrix from cache [blink][yellow]...[/yellow][/blink]')
+            if HANLP_VERBOSE:
+                flash('Loading vocab and matrix from cache [blink][yellow]...[/yellow][/blink]')
             vocab = load_pickle(vocab_path)
             matrix = torch.load(matrix_path, map_location='cpu')
-            flash('')
+            if HANLP_VERBOSE:
+                flash('')
             return vocab, matrix
         except IOError:
             pass
 
     word2vec, dim = load_word2vec(path, delimiter, cache)
     vocab = dict((k, i) for i, k in enumerate(word2vec.keys()))
-    matrix = torch.Tensor(list(word2vec.values()))
+    matrix = torch.Tensor(np.stack(list(word2vec.values())))
     if cache:
         flash('Caching vocab and matrix [blink][yellow]...[/yellow][/blink]')
         save_pickle(vocab, vocab_path)
@@ -281,3 +284,12 @@ def lengths_to_mask(seq_len, max_len=None):
 
 def activation_from_name(name: str):
     return getattr(torch.nn, name)
+
+
+def filter_state_dict_safely(model_state: dict, load_state: dict):
+    safe_state = dict()
+    for k, v in load_state.items():
+        model_v = model_state.get(k, None)
+        if model_v is not None and model_v.shape == v.shape:
+            safe_state[k] = v
+    return safe_state

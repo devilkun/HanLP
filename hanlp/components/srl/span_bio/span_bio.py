@@ -168,16 +168,17 @@ class SpanBIOSemanticRoleLabeler(TorchComponent):
     def decode_output(self, pred, mask, batch, decoder=None):
         # naive = self.naive_decode(pred, mask, batch, decoder)
         vocab = self.vocabs['srl'].idx_to_token
-        if self.config.crf:
-            if not decoder:
-                decoder = self.model.decoder
-            crf: CRF = decoder.crf
-            token_index, mask = mask
-            pred = crf.decode(pred, mask)
-            pred = sum(pred, [])
-        else:
-            pred = pred[mask].argmax(-1)
-            pred = pred.tolist()
+        if mask is not None:
+            if self.config.crf:
+                if not decoder:
+                    decoder = self.model.decoder
+                crf: CRF = decoder.crf
+                token_index, mask = mask
+                pred = crf.decode(pred, mask)
+                pred = sum(pred, [])
+            else:
+                pred = pred[mask].argmax(-1)
+                pred = pred.tolist()
         pred = [vocab[x] for x in pred]
         results = []
         offset = 0
@@ -246,12 +247,15 @@ class SpanBIOSemanticRoleLabeler(TorchComponent):
                          sampler_builder: SamplerBuilder = None,
                          gradient_accumulation=1,
                          shuffle=False, device=None, logger: logging.Logger = None,
+                         transform=None,
                          **kwargs) -> DataLoader:
         if isinstance(data, TransformableDataset):
             dataset = data
         else:
-            dataset = self.build_dataset(data, [self.config.embed.transform(vocabs=self.vocabs), self.vocabs,
-                                                FieldLength('token')])
+            transforms = [self.config.embed.transform(vocabs=self.vocabs), self.vocabs, FieldLength('token')]
+            if transform:
+                transforms.insert(0, transform)
+            dataset = self.build_dataset(data, transforms)
         if self.vocabs.mutable:
             # noinspection PyTypeChecker
             self.build_vocabs(dataset, logger)
@@ -332,6 +336,7 @@ class SpanBIOSemanticRoleLabeler(TorchComponent):
             eval_trn=False,
             logger=None,
             devices: Union[float, int, List[int]] = None,
+            transform=None,
             **kwargs):
         return super().fit(**merge_locals_kwargs(locals(), kwargs))
 

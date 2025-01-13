@@ -126,9 +126,10 @@ class TransformableDataset(Transformable, Dataset, ABC):
         if generate_idx is None:
             generate_idx = isinstance(data, list)
         data_ = self.load_data(data, generate_idx)
-        assert data_, f'No samples loaded from {data}'
-        assert isinstance(data_[0],
-                          dict), f'TransformDataset expects each sample to be a dict but got {type(data_[0])} instead.'
+        # assert data_, f'No samples loaded from {data}'
+        if data_:
+            assert isinstance(data_[0], dict
+                              ), f'TransformDataset expects each sample to be a dict but got {type(data_[0])} instead.'
         self.data = data_
         if cache:
             self.cache = [None] * len(data_)
@@ -212,7 +213,7 @@ class TransformableDataset(Transformable, Dataset, ABC):
         return len(self.data)
 
     def __repr__(self) -> str:
-        return f'{len(self)} samples: {self[0]} ...'
+        return f'{len(self)} samples: {self[0] if len(self) else ""} ...'
 
     def purge_cache(self):
         """Purges all cache. If cache is not enabled, this method enables it.
@@ -439,7 +440,7 @@ class PadSequenceDataLoader(DataLoader):
             if vocab:
                 pad = vocab.safe_pad_token_idx
                 dtype = torch.long
-            elif pad_dict is not None and field in pad_dict:
+            elif pad_dict is not None and pad_dict.get(field, None) is not None:
                 pad = pad_dict[field]
                 dtype = dtype_of(pad)
             elif field.endswith('_offset') or field.endswith('_id') or field.endswith(

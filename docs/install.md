@@ -12,7 +12,7 @@ Choose your HanLP version
 
 ## Install RESTful Packages
 
-[![Downloads](https://pepy.tech/badge/hanlp-restful)](https://pepy.tech/project/hanlp-restful) [![Downloads](https://pepy.tech/badge/hanlp-restful/month)](https://pepy.tech/project/hanlp-restful) [![Downloads](https://pepy.tech/badge/hanlp-restful/week)](https://pepy.tech/project/hanlp-restful) 
+[![Downloads](https://static.pepy.tech/badge/hanlp-restful)](https://pepy.tech/project/hanlp-restful) [![Downloads](https://static.pepy.tech/badge/hanlp-restful/month)](https://pepy.tech/project/hanlp-restful) [![Downloads](https://static.pepy.tech/badge/hanlp-restful/week)](https://pepy.tech/project/hanlp-restful) 
 
 ```{eval-rst}
 .. margin:: **Beginners Attention**
@@ -40,7 +40,7 @@ See [Golang instructions](https://hanlp.hankcs.com/docs/api/restful_golang.html)
 
 ## Install Native Package
 
-[![Downloads](https://pepy.tech/badge/hanlp)](https://pepy.tech/project/hanlp) [![Downloads](https://pepy.tech/badge/hanlp/month)](https://pepy.tech/project/hanlp) [![Downloads](https://pepy.tech/badge/hanlp/week)](https://pepy.tech/project/hanlp)  
+[![Downloads](https://static.pepy.tech/badge/hanlp)](https://pepy.tech/project/hanlp) [![Downloads](https://static.pepy.tech/badge/hanlp/month)](https://pepy.tech/project/hanlp) [![Downloads](https://static.pepy.tech/badge/hanlp/week)](https://pepy.tech/project/hanlp)  
 
 The native package running locally can be installed via pip.
 
@@ -71,7 +71,9 @@ HanLP also perfectly supports accelerating on Apple Silicon M1 chips, see [tutor
 | Flavor  | Description                                                  |
 | ------- | ------------------------------------------------------------ |
 | default | This installs the default version which delivers the most commonly used functionalities. However, some heavy dependencies like TensorFlow are not installed. |
-| full    | For experts who seek to maximize the efficiency via TensorFlow and C++ extensions, `pip install hanlp[full]` installs every dependency HanLP will use in production. |
+| tf      | This installs TensorFlow and fastText.                       |
+| amr     | To support Abstract Meaning Representation (AMR) models, this installs AMR related dependencies like `penman`. |
+| full    | For experts who seek to maximize the efficiency via TensorFlow and C++ extensions, `pip install hanlp[full]` installs all the above dependencies. |
 
 
 ## Install Models
@@ -81,11 +83,34 @@ Occasionally, some errors might occur the first time you load a model, in which 
 
 ### Download Error
 
-If the auto-download fails, you can either:
+#### HanLP Models
+
+If the auto-download of a HanLP model fails, you can either:
 
 1. Retry as our file server might be busy serving users from all over the world.
 1. Follow the message on your terminal, which often guides you to manually download a `zip` file to a particular path. 
 1. Use a [mirror site](https://hanlp.hankcs.com/docs/configure.html#use-mirror-sites) which could be faster and stabler in your region.
+
+#### Hugging Face 🤗 Transformers Models
+
+If the auto-download of a Hugging Face 🤗 Transformers model fails, e.g., the following exception is threw out:
+
+```bash
+lib/python3.8/site-packages/transformers/file_utils.py", line 2102, in get_from_cache
+    raise ValueError(
+ValueError: Connection error, and we cannot find the requested files in the cached 
+path. Please try again or make sure your Internet connection is on.
+```
+
+You can either:
+
+1. Retry as the Internet is quite unstable in some regions (e.g., China).
+
+2. Force Hugging Face 🤗 Transformers to use cached models instead of checking updates from the Internet **if you have ever successfully loaded it before**, by setting the following environment variable:
+
+   ```bash
+   export TRANSFORMERS_OFFLINE=1
+   ```
 
 ### Server without Internet
 
@@ -94,11 +119,6 @@ If your server has no Internet access at all, just debug your codes on your loca
 1. `~/.hanlp`: the home directory for HanLP models.
 1. `~/.cache/huggingface`: the home directory for Hugging Face 🤗 Transformers.
 
-````{margin} **Thirdparty Versions**
-```{danger}
-NEVER install TensorFlow/fastText by yourself, as higher or lower versions of TensorFlow have not been tested and might not work properly. 
-```
-````
 
 ### Import Error
 
@@ -108,3 +128,6 @@ Some TensorFlow/fastText models will ask you to install the missing TensorFlow/f
 pip install hanlp[full]
 ```
 
+```{danger}
+NEVER install thirdparty packages (TensorFlow/fastText etc.) by yourself, as higher or lower versions of thirparty packages have not been tested and might not work properly.
+```

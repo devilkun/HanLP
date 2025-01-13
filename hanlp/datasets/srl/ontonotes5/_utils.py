@@ -12,7 +12,7 @@ from typing import List, Dict, Union
 from hanlp_common.io import eprint, save_json
 
 from hanlp.common.transform import NormalizeToken
-from hanlp.datasets.parsing.loaders._ctb_utils import remove_all_ec, convert_to_stanford_dependency_330
+from hanlp.datasets.parsing.loaders._ctb_utils import remove_all_ec, convert_to_dependency
 from hanlp.datasets.parsing.ptb import PTB_TOKEN_MAPPING
 from hanlp.utils.io_util import merge_files, get_resource, pushd, run_cmd, read_tsv_as_sents, replace_ext, \
     get_exitcode_stdout_stderr
@@ -397,7 +397,7 @@ def make_ontonotes_language_jsonlines(conll12_ontonotes_path, output_path=None, 
         pprint(stats)
         conll12_json_file = f'{lang_dir}/{split}.{language}.conll12.jsonlines'
         print(f'Applying CoNLL 12 official splits on {v5_json_file} to {conll12_json_file}')
-        id_file = get_resource(f'https://od.hankcs.com/research/emnlp2021/conll.cemantix.org.zip#2012/download/ids/'
+        id_file = get_resource(f'https://file.hankcs.com/research/emnlp2021/conll.cemantix.org.zip#2012/download/ids/'
                                f'{language}/coref/{split}.id')
         filter_data(v5_json_file, conll12_json_file, id_file)
 
@@ -538,7 +538,7 @@ def batch_remove_empty_category_if_necessary(json_files):
 
 def make_dep_conllx(con_txt_file, output_file, language='en'):
     con_txt_file = get_resource(con_txt_file)
-    convert_to_stanford_dependency_330(con_txt_file, output_file, language=language)
+    convert_to_dependency(con_txt_file, output_file, language=language)
 
 
 def make_dep_conllx_if_necessary(con_txt_file: str, language='en'):

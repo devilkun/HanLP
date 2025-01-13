@@ -2,9 +2,14 @@
 # Author: hankcs
 # Date: 2020-05-09 13:38
 import logging
-from typing import Optional, Callable, Union
+import math
+import os.path
+from typing import Optional, Callable, Union, List, Dict
 
 import torch
+from hanlp_common.configurable import AutoConfigurable
+from hanlp_common.constant import HANLP_VERBOSE
+from hanlp_trie.trie import Trie
 from torch import nn
 from torch.utils.data import DataLoader
 
@@ -15,9 +20,8 @@ from hanlp.common.vocab import Vocab
 from hanlp.layers.dropout import WordDropout
 from hanlp.layers.embeddings.embedding import Embedding, EmbeddingDim
 from hanlp.layers.embeddings.util import build_word2vec_with_vocab
+from hanlp.utils.log_util import flash
 from hanlp.utils.torch_util import load_word2vec_as_vocab_tensor
-from hanlp_common.configurable import AutoConfigurable
-from hanlp_trie.trie import Trie
 
 
 class Word2VecEmbeddingModule(nn.Module, EmbeddingDim):
@@ -114,7 +118,7 @@ class Word2VecEmbedding(Embedding, AutoConfigurable):
             trainable: ``False`` to use static embeddings.
             second_channel: A trainable second channel for each token, which will be added to pretrained embeddings.
             word_dropout: The probability of randomly replacing a token with ``UNK``.
-            normalize: ``True`` or a method to normalize the embedding matrix.
+            normalize: ``l2`` or ``std`` to normalize the embedding matrix.
             cpu: Reside on CPU instead of GPU.
             init: Indicate which initialization to use for oov tokens.
         """
@@ -177,11 +181,12 @@ class Word2VecEmbeddingComponent(TorchComponent):
             **kwargs:
         """
         super().__init__(**kwargs)
+        self._tokenizer: Trie = None
 
-    def build_dataloader(self, data, shuffle=False, device=None, logger: logging.Logger = None,
-                         **kwargs) -> DataLoader:
-        dataset = Word2VecDataset([{'token': data}], transform=self.vocabs)
-        return PadSequenceDataLoader(dataset, device=device)
+    def build_dataloader(self, data: List[str], shuffle=False, device=None, logger: logging.Logger = None,
+                         doc2vec=False, batch_size=32, **kwargs) -> DataLoader:
+        dataset = Word2VecDataset([{'token': x} for x in data], transform=self._tokenize if doc2vec else self.vocabs)
+        return PadSequenceDataLoader(dataset, device=device, batch_size=batch_size)
 
     def build_optimizer(self, **kwargs):
         raise NotImplementedError('Not supported.')
@@ -209,13 +214,91 @@ class Word2VecEmbeddingComponent(TorchComponent):
         pass
 
     def build_model(self, training=True, **kwargs) -> torch.nn.Module:
+        self._tokenizer = None
         embed: Word2VecEmbedding = self.config.embed
-        return embed.module(self.vocabs)
+        model = embed.module(self.vocabs)
+        return model
 
-    def predict(self, data: str, **kwargs):
-        dataloader = self.build_dataloader(data, device=self.device)
+    def predict(self, word: str, doc2vec=False, **kwargs):
+        dataloader = self.build_dataloader([word], device=self.device, doc2vec=doc2vec)
         for batch in dataloader:  # It's a toy so doesn't really do batching
-            return self.model(batch)[0]
+            embeddings = self.model(batch)[0]
+            if doc2vec:
+                embeddings = embeddings[0].mean(dim=0)
+            return embeddings
+
+    @torch.no_grad()
+    def most_similar(self, words: Union[str, List[str]], topk=10, doc2vec=False, similarity_less_than=None,
+                     batch_size=32) -> Union[Dict[str, float], List[Dict[str, float]]]:
+        """Find the `topk` most similar words of a given word or phrase.
+
+        Args:
+            words: A word or phrase or multiple words/phrases.
+            topk: Number of top similar words.
+            doc2vec: Enable doc2vec model for processing OOV and phrases.
+            similarity_less_than: Only return words with a similarity less than this value.
+            batch_size: Number of words or phrases per batch.
+
+        Returns:
+            Similar words and similarities stored in a dict.
+        """
+        flat = isinstance(words, str)
+        if flat:
+            words = [words]
+        dataloader = self.build_dataloader(words, device=self.device, doc2vec=doc2vec, batch_size=batch_size)
+        results = []
+        vocab = self.vocabs['token']
+        for batch in dataloader:
+            embeddings = self.model(batch)
+            token_id = batch['token_id']
+            if doc2vec:
+                lens = token_id.count_nonzero(dim=1)
+                embeddings = embeddings.sum(1)
+                embeddings = embeddings / lens.unsqueeze(1)
+                block_word_id = batch['block_word_id']
+                token_is_unk = (lens == 1) & (token_id[:, 0] == vocab.unk_idx)
+            else:
+                block_word_id = token_id
+                token_is_unk = token_id == vocab.unk_idx
+            similarities = torch.nn.functional.cosine_similarity(embeddings.unsqueeze(1), self.model.embed.weight,
+                                                                 dim=-1)
+            if similarity_less_than is not None:
+                similarities[similarities > similarity_less_than] = -math.inf
+            similarities[torch.arange(similarities.size(0), device=self.device), block_word_id] = -math.inf
+            scores, indices = similarities.topk(topk)
+
+            for sc, idx, unk in zip(scores.tolist(), indices.tolist(), token_is_unk.tolist()):
+                results.append(dict() if unk else dict(zip([vocab.idx_to_token[i] for i in idx], sc)))
+        if flat:
+            results = results[0]
+        return results
+
+    def _tokenize(self, sample: dict) -> dict:
+        tokens = sample['token']
+        ids = [idx for b, e, idx in self.tokenizer.parse_longest(tokens)]
+        vocab = self.vocabs['token']
+        if not ids:
+            ids = [vocab.unk_idx]
+        sample['token_id'] = ids
+        sample['block_word_id'] = ids[0] if len(ids) == 1 else vocab.pad_idx
+        return sample
+
+    @property
+    def tokenizer(self):
+        if not self._tokenizer:
+            if HANLP_VERBOSE:
+                flash('Building Trie-based tokenizer for Doc2Vec [blink][yellow]...[/yellow][/blink]')
+            self._tokenizer = Trie(self.vocabs['token'].token_to_idx)
+            if HANLP_VERBOSE:
+                flash('')
+        return self._tokenizer
+
+    def load_config(self, save_dir, filename='config.json', **kwargs):
+        if os.path.isfile(save_dir):
+            self.config.update({'classpath': 'hanlp.layers.embeddings.word2vec.Word2VecEmbeddingComponent',
+                                'embed': Word2VecEmbedding(field='token', embed=save_dir, normalize='l2')})
+            return
+        super().load_config(save_dir, filename, **kwargs)
 
 
 class GazetterTransform(object):

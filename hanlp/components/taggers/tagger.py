@@ -29,10 +29,10 @@ class Tagger(DistillableComponent, ABC):
         elif optimizer == 'sgd':
             return torch.optim.SGD(self.model.parameters(), lr=lr)
 
-    def build_criterion(self, model=None, reduction='mean', **kwargs):
+    def build_criterion(self, model=None, reduction='mean', decoder=None, **kwargs):
         if self.config.get('crf', False):
             if not model:
-                model = self.model
+                model = decoder or self.model
             if isinstance(model, nn.DataParallel):
                 raise ValueError('DataParallel not supported when CRF is used')
                 return self.model_from_config.module.crf
@@ -60,14 +60,13 @@ class Tagger(DistillableComponent, ABC):
             if model is None:
                 model = self.model
             crf: CRF = model.crf
-            outputs = crf.decode(logits, mask)
-            return [y[0] for y in outputs]
+            return crf.decode(logits, mask)
         else:
             return logits.argmax(-1)
 
     def execute_training_loop(self, trn: DataLoader, dev: DataLoader, epochs, criterion, optimizer, metric, save_dir,
                               logger: logging.Logger, devices, ratio_width=None, patience=5, teacher=None,
-                              kd_criterion=None,
+                              kd_criterion=None, eval_trn=True,
                               **kwargs):
         best_epoch, best_metric = 0, -1
         timer = CountdownTimer(epochs)
@@ -75,7 +74,7 @@ class Tagger(DistillableComponent, ABC):
         for epoch in range(1, epochs + 1):
             logger.info(f"[yellow]Epoch {epoch} / {epochs}:[/yellow]")
             self.fit_dataloader(trn, criterion, optimizer, metric, logger, history=history, ratio_width=ratio_width,
-                                **self.config)
+                                eval_trn=eval_trn, **self.config)
             loss, dev_metric = self.evaluate_dataloader(dev, criterion, logger=logger, ratio_width=ratio_width)
             timer.update()
             report = f"{timer.elapsed_human} / {timer.total_time_human} ETA: {timer.eta_human}"
@@ -161,7 +160,8 @@ class Tagger(DistillableComponent, ABC):
         samples = self.build_samples(data, **kwargs)
         if not batch_size:
             batch_size = self.config.get('batch_size', 32)
-        dataloader = self.build_dataloader(samples, batch_size, False, self.device, sampler_builder=sampler_builder)
+        dataloader = self.build_dataloader(samples, batch_size, False, self.device, sampler_builder=sampler_builder,
+                                           **kwargs)
         outputs = []
         orders = []
         vocab = self.vocabs['tag'].idx_to_token
@@ -179,7 +179,9 @@ class Tagger(DistillableComponent, ABC):
     def prediction_to_human(self, pred_ids, vocab: List[str], batch):
         if isinstance(pred_ids, torch.Tensor):
             pred_ids = pred_ids.tolist()
-        sents = batch[self.config.token_key]
+        sents = batch.get(f'{self.config.token_key}_')
+        if not sents:
+            sents = batch[self.config.token_key]
         dict_tags: DictInterface = self.dict_tags
         for each, sent in zip(pred_ids, sents):
             tags = [vocab[id] for id in each[:len(sent)]]
@@ -217,6 +219,7 @@ class Tagger(DistillableComponent, ABC):
     def dict_tags(self,
                   dictionary: Union[DictInterface, Union[Dict[Union[str, Sequence[str]], Union[str, Sequence[str]]]]]):
         if dictionary is not None and not isinstance(dictionary, DictInterface):
+            assert isinstance(dictionary, dict), f'Expected dictionary to be `dict` but got {type(dictionary)}.'
             _d = dict()
             for k, v in dictionary.items():
                 if isinstance(k, str):
